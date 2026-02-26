@@ -8,7 +8,7 @@ TMP_SCRIPT="/tmp/gh_script_installer.sh"
 # Заполните ссылки ниже своими URL (raw github/gist).
 # Если ссылка пустая, пункт меню сообщит что нужно заполнить URL.
 # ------------------------------------------------------------
-PASSWALL_URL=""
+PASSWALL_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/paswall.sh"
 ZAPRET_URL=""
 FRP_URL=""
 TIME_URL=""
