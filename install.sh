@@ -12,7 +12,7 @@ PASSWALL_URL=""
 ZAPRET_URL=""
 FRP_URL=""
 TIME_URL=""
-ADMIN_URL=""
+ADMIN_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/adminpanel.sh"
 
 usage() {
   cat <<'USAGE'
