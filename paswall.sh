@@ -1,14 +1,9 @@
 #!/bin/sh
 set -eu
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-say() { printf "%b\n" "$*"; }
-die() { say "${RED}ERROR:${NC} $*"; exit 1; }
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+say(){ printf "%b\n" "$*"; }
+die(){ say "${RED}ERROR:${NC} $*"; exit 1; }
 
 [ "$(id -u)" = "0" ] || die "Запусти от root."
 
@@ -18,7 +13,6 @@ say "${CYAN}========================================${NC}"
 
 get_sub_url() {
   EXISTING="$(uci -q get passwall.@subscribe_list[0].url 2>/dev/null || true)"
-
   say "${YELLOW}[Atlanta] Вставь ссылку подписки (Enter = оставить текущую)${NC}"
   [ -n "${EXISTING:-}" ] && say "${CYAN}[Atlanta] Текущая:${NC} $EXISTING"
 
@@ -27,13 +21,10 @@ get_sub_url() {
     printf "%b" "${CYAN}[Atlanta] URL> ${NC}" >/dev/tty
     IFS= read -r SUB_URL </dev/tty || true
   fi
-  if [ -z "${SUB_URL:-}" ]; then
-    IFS= read -r SUB_URL || true
-  fi
-
+  [ -z "${SUB_URL:-}" ] && { IFS= read -r SUB_URL || true; }
   [ -z "${SUB_URL:-}" ] && SUB_URL="$EXISTING"
-  [ -n "${SUB_URL:-}" ] || die "URL подписки пустой."
 
+  [ -n "${SUB_URL:-}" ] || die "URL подписки пустой."
   case "$SUB_URL" in http://*|https://*) : ;; *) die "URL должен начинаться с http:// или https://";; esac
   echo "$SUB_URL"
 }
@@ -41,11 +32,11 @@ get_sub_url() {
 SUB_URL="$(get_sub_url)"
 say "${CYAN}[Atlanta] Использую URL:${NC} $SUB_URL"
 
-# --- upstream installer ---
+# --- install via upstream passwallx.sh ---
 UP_URL="https://raw.githubusercontent.com/amirhosseinchoghaei/Passwall/main/passwallx.sh"
 TMP="/tmp/passwallx.sh"
 
-say "${YELLOW}[Atlanta] Скачиваю и запускаю оригинальный установщик PassWall...${NC}"
+say "${YELLOW}[Atlanta] Установка PassWall через оригинальный скрипт...${NC}"
 rm -f "$TMP"
 if command -v uclient-fetch >/dev/null 2>&1; then
   uclient-fetch -O "$TMP" "$UP_URL" || die "Не удалось скачать $UP_URL"
@@ -55,8 +46,8 @@ fi
 chmod +x "$TMP"
 sh "$TMP" || die "Оригинальный установщик завершился с ошибкой."
 
-# --- pw1-xraybal-sync hook ---
-say "${YELLOW}[Atlanta] Ставлю хук синхронизации xray balancing...${NC}"
+# --- install pw1-xraybal-sync + hook into subscribe.lua ---
+say "${YELLOW}[Atlanta] Ставлю pw1-xraybal-sync (балансинг после подписки)...${NC}"
 cat <<'EOF' > /usr/bin/pw1-xraybal-sync.sh
 #!/bin/sh
 set -u
@@ -116,7 +107,6 @@ uci -q delete "$NS.$BAL_SEC.$BAL_KEY" 2>/dev/null || true
 echo "$picked" | while read -r n; do
   [ -n "$n" ] && uci -q add_list "$NS.$BAL_SEC.$BAL_KEY=$n"
 done
-
 uci -q set "$NS.$BAL_SEC.enable='1'" 2>/dev/null || true
 uci -q commit "$NS"
 log "OK: committed"
@@ -130,14 +120,20 @@ if [ -f "$SUB_LUA" ]; then
   grep -Fq "$HOOK_LINE" "$SUB_LUA" || echo "$HOOK_LINE" >> "$SUB_LUA"
 fi
 
-# --- backup existing config ---
+# --- backup current passwall config ---
 TS="$(date +%Y%m%d-%H%M%S 2>/dev/null || echo unknown)"
 [ -f /etc/config/passwall ] && cp -a /etc/config/passwall "/etc/config/passwall.bak.$TS" || true
 
-# --- apply your passwall UCI config (same as before) ---
-say "${YELLOW}[Atlanta] Накатываю твой конфиг PassWall...${NC}"
-cat >/etc/config/passwall <<'EOF'
-# (оставил как у тебя; сюда вставь свой полный конфиг если менялся)
+# --- IMPORTANT: disable auto rule update to avoid overwriting your lists right away ---
+say "${YELLOW}[Atlanta] Отключаю авто-обновление rules (чтобы не перетирало списки)...${NC}"
+uci -q set passwall.@global_rules[0].auto_update='0'     2>/dev/null || true
+uci -q set passwall.@global_rules[0].chnlist_update='0'  2>/dev/null || true
+uci -q set passwall.@global_rules[0].chnroute_update='0' 2>/dev/null || true
+uci -q commit passwall 2>/dev/null || true
+
+# --- write YOUR config: embed URL directly so it cannot revert ---
+say "${YELLOW}[Atlanta] Пишу конфиг PassWall (URL вшит сразу)...${NC}"
+cat >/etc/config/passwall <<EOF
 config global
 	option enabled '1'
 	option dns_shunt 'dnsmasq'
@@ -153,9 +149,9 @@ config global
 	option flush_set_on_reboot '1'
 
 config global_rules
-	option auto_update '1'
-	option chnlist_update '1'
-	option chnroute_update '1'
+	option auto_update '0'
+	option chnlist_update '0'
+	option chnroute_update '0'
 	option week_update '8'
 	option interval_update '1'
 	list chnroute_url 'https://1222.hb.ru-msk.vkcloud-storage.ru/domenchik/ipchik.lst'
@@ -168,37 +164,27 @@ config global_rules
 
 config subscribe_list
 	option remark 'AtlantaRouter'
-	option url 'https://example.invalid/replace-me'
+	option url '$SUB_URL'
+	option allowInsecure '0'
 	option auto_update '1'
 	option week_update '8'
 	option interval_update '1'
 	option user_agent 'passwall'
+
+# NOTE: твои nodes/balancing можешь сюда дописать если нужно.
 EOF
 
-# --- set subscription URL reliably (only existing subscribe_list) ---
-say "${YELLOW}[Atlanta] Проставляю URL подписки в UCI...${NC}"
-SUB_SECS="$(uci -q show passwall | sed -n "s/^passwall\.\([^=]*\)=subscribe_list.*/\1/p")"
-if [ -n "${SUB_SECS:-}" ]; then
-  for s in $SUB_SECS; do
-    uci -q set "passwall.$s.remark=AtlantaRouter"
-    uci -q set "passwall.$s.url=$SUB_URL"
-    uci -q delete "passwall.$s.md5" 2>/dev/null || true
-  done
-else
-  sec="$(uci -q add passwall subscribe_list)"
-  uci -q set "passwall.$sec.remark=AtlantaRouter"
-  uci -q set "passwall.$sec.url=$SUB_URL"
-fi
-
-# bump timestamp to force UI/logic refresh
+# Force URL again via UCI (belt & suspenders)
+uci -q set passwall.@subscribe_list[0].remark='AtlantaRouter' 2>/dev/null || true
+uci -q set passwall.@subscribe_list[0].url="$SUB_URL"        2>/dev/null || true
+uci -q delete passwall.@subscribe_list[0].md5 2>/dev/null || true
 uci -q set passwall.@global[0].timestamp="$(date +%s 2>/dev/null || echo 0)" 2>/dev/null || true
 uci -q commit passwall || true
 
-# --- write lists to the exact directory LuCI reads + duplicate ---
-say "${YELLOW}[Atlanta] Применяю списки и делаю reload...${NC}"
+# --- write lists to LuCI-visible path + duplicates ---
+say "${YELLOW}[Atlanta] Пишу списки в /usr/share/passwall/rules и делаю reload...${NC}"
 mkdir -p /usr/share/passwall/rules /etc/passwall/rules /etc/passwall 2>/dev/null || true
 
-# твой direct_host / direct_ip (замени на свои реальные списки)
 cat >/usr/share/passwall/rules/direct_host <<'EOF'
 #ATLANTA_DIRECT_HOST
 youtube.com
@@ -215,46 +201,41 @@ cat >/usr/share/passwall/rules/direct_ip <<'EOF'
 #ATLANTA_DIRECT_IP
 EOF
 
-# чтобы UI точно не показывал "IRAN_*" — продублируем также в route/proxy
-cp -f /usr/share/passwall/rules/direct_host /usr/share/passwall/rules/route_host 2>/dev/null || true
-cp -f /usr/share/passwall/rules/direct_ip   /usr/share/passwall/rules/route_ip   2>/dev/null || true
+# Also mirror to files some LuCI tabs may display
 cp -f /usr/share/passwall/rules/direct_host /usr/share/passwall/rules/proxy_host 2>/dev/null || true
+cp -f /usr/share/passwall/rules/direct_host /usr/share/passwall/rules/route_host 2>/dev/null || true
 cp -f /usr/share/passwall/rules/direct_ip   /usr/share/passwall/rules/proxy_ip   2>/dev/null || true
+cp -f /usr/share/passwall/rules/direct_ip   /usr/share/passwall/rules/route_ip   2>/dev/null || true
 
-# дубли в /etc (на случай другой логики в сборке)
-for f in direct_host direct_ip route_host route_ip proxy_host proxy_ip; do
+# duplicates in /etc (some builds read from there)
+for f in direct_host direct_ip proxy_host proxy_ip route_host route_ip; do
   [ -f "/usr/share/passwall/rules/$f" ] || continue
   cp -f "/usr/share/passwall/rules/$f" "/etc/passwall/rules/$f" 2>/dev/null || true
   cp -f "/usr/share/passwall/rules/$f" "/etc/passwall/$f"       2>/dev/null || true
 done
 
-# --- hard reload: rules + subscribe + balancing sync ---
-RULES_ERR="/tmp/atl_rules_reload.log"
-SUB_ERR="/tmp/atl_subscribe_reload.log"
-: > "$RULES_ERR" || true
-: > "$SUB_ERR" || true
+# --- HARD reload sequence ---
+SUB_LOG="/tmp/atl_subscribe_reload.log"
+: > "$SUB_LOG" || true
 
-# 1) попробовать обновить rules (chnlist/chnroute), если в сборке есть скрипт обновления
-# (не во всех сборках есть отдельный entrypoint, поэтому best-effort)
-if [ -x /usr/bin/passwall ]; then
-  /usr/bin/passwall rules >>"$RULES_ERR" 2>&1 || true
-fi
-
-# 2) обновить подписку
+say "${YELLOW}[Atlanta] Обновляю подписку (lua subscribe.lua)...${NC}"
 if command -v lua >/dev/null 2>&1 && [ -f /usr/share/passwall/subscribe.lua ]; then
-  lua /usr/share/passwall/subscribe.lua >>"$SUB_ERR" 2>&1 || true
+  lua /usr/share/passwall/subscribe.lua >>"$SUB_LOG" 2>&1 || true
+else
+  echo "NO: /usr/share/passwall/subscribe.lua not found or lua missing" >>"$SUB_LOG"
 fi
 
-# 3) sync balancing после подписки
+say "${YELLOW}[Atlanta] Sync balancing...${NC}"
 /usr/bin/pw1-xraybal-sync.sh >>/tmp/pw-xraybal.log 2>&1 || true
 
-# --- restart services to apply everything immediately ---
+say "${YELLOW}[Atlanta] Restart passwall + dnsmasq + firewall...${NC}"
+/etc/init.d/passwall enable 2>/dev/null || true
 /etc/init.d/passwall restart 2>/dev/null || /etc/init.d/passwall start 2>/dev/null || true
 /etc/init.d/dnsmasq restart 2>/dev/null || true
 /etc/init.d/firewall restart 2>/dev/null || true
 
-say "${GREEN}[Atlanta] Готово. Конфиг + списки применены и принудительно перезагружены.${NC}"
+say "${GREEN}[Atlanta] ГОТОВО.${NC}"
 say "${CYAN}URL:${NC} $(uci -q get passwall.@subscribe_list[0].url 2>/dev/null || echo '?')"
-say "${CYAN}Rules reload log:${NC} tail -n 80 $RULES_ERR 2>/dev/null || true"
-say "${CYAN}Subscribe reload log:${NC} tail -n 80 $SUB_ERR 2>/dev/null || true"
+say "${CYAN}Subscribe log:${NC} tail -n 80 $SUB_LOG 2>/dev/null || true"
 say "${CYAN}Balancing log:${NC} tail -n 80 /tmp/pw-xraybal.log 2>/dev/null || true"
+say "${CYAN}Direct_host head:${NC} head -n 10 /usr/share/passwall/rules/direct_host 2>/dev/null || true"
