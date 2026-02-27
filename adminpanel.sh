@@ -1,4 +1,28 @@
-cat <<'PANELFILE' > /www/cgi-bin/panel
+cat <<'EOF' > /tmp/install_atlanta_panel_ru_clean.sh
+#!/bin/sh
+set -eu
+
+CGI_DIR="/www/cgi-bin"
+PANEL="$CGI_DIR/panel"
+CONF="/etc/config/atl_panel"
+
+WIFI_SSID_24="Atlanta 2.4Ghz"
+WIFI_SSID_5="Atlanta 5Ghz"
+WIFI_KEY="11111111"
+
+mkdir -p "$CGI_DIR"
+
+# --- init panel auth config (UCI) ---
+[ -f "$CONF" ] || {
+  cat <<'UCI' > "$CONF"
+config atl_panel 'main'
+  option user 'admin'
+  option pass 'admin'
+UCI
+}
+
+# --- write panel CGI (current working version) ---
+cat <<'PANELFILE' > "$PANEL"
 #!/bin/sh
 set -eu
 
@@ -124,19 +148,6 @@ l2tp_install_bg_once(){
   ) >/dev/null 2>&1 &
 }
 
-l2tp_install_sync(){
-  command -v opkg >/dev/null 2>&1 || return 1
-  {
-    echo "=== $(date) L2TP install (sync) ==="
-    opkg update || true
-    for p in luci-proto-l2tp xl2tpd ppp ppp-mod-pppol2tp kmod-pppol2tp kmod-l2tp; do
-      opkg install "$p" || true
-    done
-    echo "=== done ==="
-  } >>"$OPKG_LOG" 2>&1
-  has_l2tp
-}
-
 pptp_install_bg_once(){
   has_pptp && return 0
   command -v opkg >/dev/null 2>&1 || return 0
@@ -160,20 +171,6 @@ pptp_install_bg_once(){
   ) >/dev/null 2>&1 &
 }
 
-pptp_install_sync(){
-  command -v opkg >/dev/null 2>&1 || return 1
-  {
-    echo "=== $(date) PPTP install (sync) ==="
-    opkg update || true
-    for p in luci-proto-ppp ppp ppp-mod-pptp kmod-gre kmod-ppp kmod-pppox; do
-      opkg install "$p" || true
-    done
-    echo "=== done ==="
-  } >>"$OPKG_LOG" 2>&1
-  has_pptp
-}
-
-# автоустановка L2TP/PPTP в фоне при заходе
 l2tp_install_bg_once || true
 pptp_install_bg_once || true
 
@@ -198,7 +195,7 @@ UCI
   return 0
 }
 
-# ---------- GET messages ----------
+# ---------- GET ----------
 QS="${QUERY_STRING:-}"
 GET_M="$(printf "%s" "$QS" | tr '&' '\n' | sed -n 's/^m=//p' | head -n1 | urldecode 2>/dev/null || true)"
 GET_E="$(printf "%s" "$QS" | tr '&' '\n' | sed -n 's/^e=//p' | head -n1 | urldecode 2>/dev/null || true)"
@@ -213,7 +210,7 @@ if [ -n "${GET_U:-}" ]; then
   esac
 fi
 
-# ---------- POST parse ----------
+# ---------- POST ----------
 FORM_action=""
 FORM_user=""; FORM_pass=""
 FORM_new_user=""; FORM_new_pass=""
@@ -243,24 +240,19 @@ if [ "${REQUEST_METHOD:-}" = "POST" ]; then
         new_user)    FORM_new_user="$v_dec" ;;
         new_pass)    FORM_new_pass="$v_dec" ;;
         wan_proto)   FORM_wan_proto="$v_dec" ;;
-
         pppoe_user)  FORM_pppoe_user="$v_dec" ;;
         pppoe_pass)  FORM_pppoe_pass="$v_dec" ;;
-
         l2tp_server) FORM_l2tp_server="$v_dec" ;;
         l2tp_user)   FORM_l2tp_user="$v_dec" ;;
         l2tp_pass)   FORM_l2tp_pass="$v_dec" ;;
-
         pptp_server) FORM_pptp_server="$v_dec" ;;
         pptp_user)   FORM_pptp_user="$v_dec" ;;
         pptp_pass)   FORM_pptp_pass="$v_dec" ;;
-
         static_ip)   FORM_static_ip="$v_dec" ;;
         static_mask) FORM_static_mask="$v_dec" ;;
         static_gw)   FORM_static_gw="$v_dec" ;;
         static_dns1) FORM_static_dns1="$v_dec" ;;
         static_dns2) FORM_static_dns2="$v_dec" ;;
-
         ssid_24)     FORM_ssid_24="$v_dec" ;;
         key_24)      FORM_key_24="$v_dec" ;;
         ssid_5)      FORM_ssid_5="$v_dec" ;;
@@ -415,6 +407,25 @@ case "${FORM_action:-}" in
     redir "Доступ сохранён." "" ""
     ;;
 
+  reboot)
+    echo "Content-type: text/html; charset=utf-8"; echo ""
+    echo "<html><body style='font-family:sans-serif'>Роутер перезагружается…</body></html>"
+    reboot >/dev/null 2>&1 &
+    exit 0
+    ;;
+
+  restart_inet)
+    {
+      echo "=== $(date) : restart inet ==="
+      /etc/init.d/network restart 2>/dev/null || true
+      /etc/init.d/dnsmasq restart 2>/dev/null || true
+      [ -x /etc/init.d/passwall ] && /etc/init.d/passwall restart 2>/dev/null || true
+      command -v conntrack >/dev/null 2>&1 && conntrack -F 2>/dev/null || true
+      echo "=== done ==="
+    } >>"$LOG" 2>&1 &
+    redir "Команда отправлена. Интернет перезапускается…" "" ""
+    ;;
+
   update_wan)
     proto="$(printf "%s" "${FORM_wan_proto:-dhcp}" | strip_newlines)"
     IFACE="$(detect_wan_iface)"
@@ -422,7 +433,6 @@ case "${FORM_action:-}" in
       uci -q set network."$IFACE"=interface
     fi
 
-    # очистка dns (пересоберём при static)
     uci -q delete network."$IFACE".dns 2>/dev/null || true
 
     case "$proto" in
@@ -476,9 +486,7 @@ case "${FORM_action:-}" in
         uci -q delete network."$IFACE".gateway 2>/dev/null || true
         ;;
       l2tp)
-        if ! has_l2tp; then
-          l2tp_install_sync || redir "" "Не удалось установить L2TP. Лог: $OPKG_LOG" ""
-        fi
+        # (установка в фоне, как правило, уже успеет; при ошибке просто применим и сетка подхватит)
         srv="$(printf "%s" "${FORM_l2tp_server:-}" | strip_newlines | trim_spaces)"
         u="$(printf "%s" "${FORM_l2tp_user:-}" | strip_newlines)"
         p="$(printf "%s" "${FORM_l2tp_pass:-}" | strip_newlines)"
@@ -491,14 +499,8 @@ case "${FORM_action:-}" in
         uci -q set network."$IFACE".peeraddr="$srv" 2>/dev/null || true
         uci -q set network."$IFACE".username="$u"
         uci -q set network."$IFACE".password="$p"
-        uci -q delete network."$IFACE".ipaddr 2>/dev/null || true
-        uci -q delete network."$IFACE".netmask 2>/dev/null || true
-        uci -q delete network."$IFACE".gateway 2>/dev/null || true
         ;;
       pptp)
-        if ! has_pptp; then
-          pptp_install_sync || redir "" "Не удалось установить PPTP. Лог: $OPKG_LOG" ""
-        fi
         srv="$(printf "%s" "${FORM_pptp_server:-}" | strip_newlines | trim_spaces)"
         u="$(printf "%s" "${FORM_pptp_user:-}" | strip_newlines)"
         p="$(printf "%s" "${FORM_pptp_pass:-}" | strip_newlines)"
@@ -511,9 +513,6 @@ case "${FORM_action:-}" in
         uci -q set network."$IFACE".peeraddr="$srv" 2>/dev/null || true
         uci -q set network."$IFACE".username="$u"
         uci -q set network."$IFACE".password="$p"
-        uci -q delete network."$IFACE".ipaddr 2>/dev/null || true
-        uci -q delete network."$IFACE".netmask 2>/dev/null || true
-        uci -q delete network."$IFACE".gateway 2>/dev/null || true
         ;;
       *)
         redir "" "Неизвестный протокол WAN." ""
@@ -552,6 +551,7 @@ case "${FORM_action:-}" in
       is_ascii_nospace "$k5" || redir "" "Пароль 5 ГГц: латиница, без пробелов." ""
     fi
 
+    # radio0
     uci set wireless.default_radio0.ssid="$ss24_raw"
     uci set wireless.default_radio0.disabled="0"
     if [ -n "$k24" ]; then
@@ -562,6 +562,7 @@ case "${FORM_action:-}" in
       uci -q delete wireless.default_radio0.key
     fi
 
+    # radio1 (optional)
     if uci -q get wireless.radio1.type >/dev/null 2>&1; then
       [ -n "$ss5_chk" ] && uci set wireless.default_radio1.ssid="$ss5_raw"
       uci set wireless.default_radio1.disabled="0"
@@ -576,25 +577,6 @@ case "${FORM_action:-}" in
     uci commit wireless
     wifi reload >/dev/null 2>&1 &
     redir "Wi-Fi сохранён. Если вы подключены по Wi-Fi — переподключитесь к новой сети." "" ""
-    ;;
-
-  reboot)
-    echo "Content-type: text/html; charset=utf-8"; echo ""
-    echo "<html><body style='font-family:sans-serif'>Роутер перезагружается…</body></html>"
-    reboot >/dev/null 2>&1 &
-    exit 0
-    ;;
-
-  restart_inet)
-    {
-      echo "=== $(date) : restart inet ==="
-      /etc/init.d/network restart 2>/dev/null || true
-      /etc/init.d/dnsmasq restart 2>/dev/null || true
-      [ -x /etc/init.d/passwall ] && /etc/init.d/passwall restart 2>/dev/null || true
-      command -v conntrack >/dev/null 2>&1 && conntrack -F 2>/dev/null || true
-      echo "=== done ==="
-    } >>"$LOG" 2>&1 &
-    redir "Команда отправлена. Интернет перезапускается…" "" ""
     ;;
 
   passwall_update)
@@ -624,7 +606,7 @@ case "${FORM_action:-}" in
 esac
 
 # =========================
-# DISPLAY DATA
+# DISPLAY (main page)
 # =========================
 MODEL="$(cat /tmp/sysinfo/model 2>/dev/null || true)"
 HOST="$(uci -q get system.@system[0].hostname 2>/dev/null || hostname 2>/dev/null || echo OpenWrt)"
@@ -693,15 +675,6 @@ ES_24_SSID="$(printf '%s' "$CUR_24_SSID" | html_escape)"
 ES_24_KEY="$(printf '%s' "$CUR_24_KEY" | html_escape)"
 ES_5_SSID="$(printf '%s' "$CUR_5_SSID" | html_escape)"
 ES_5_KEY="$(printf '%s' "$CUR_5_KEY" | html_escape)"
-
-L2TP_NOTE=""
-if ! has_l2tp; then
-  L2TP_NOTE="<div class=\"hint\" style=\"margin-top:10px\">L2TP устанавливается автоматически. Лог: <code>$OPKG_LOG</code></div>"
-fi
-PPTP_NOTE=""
-if ! has_pptp; then
-  PPTP_NOTE="<div class=\"hint\" style=\"margin-top:10px\">PPTP устанавливается автоматически. Лог: <code>$OPKG_LOG</code></div>"
-fi
 
 cat <<HTML
 <!doctype html>
@@ -787,7 +760,6 @@ async function copyText(id){
   setTimeout(()=>toast.classList.remove('on'),1200);
 }
 function closeModal(){ g('modal').classList.remove('on'); }
-
 function updateWanFields(){
   const v = g('wan_proto').value;
   g('pppoe_fields').classList.toggle('hidden', v !== 'pppoe');
@@ -795,7 +767,6 @@ function updateWanFields(){
   g('pptp_fields').classList.toggle('hidden', v !== 'pptp');
   g('static_fields').classList.toggle('hidden', v !== 'static');
 }
-
 window.addEventListener('load', ()=>{
   const def = ${DEFAULT_WARN};
   if(def===1){ g('modal').classList.add('on'); }
@@ -858,15 +829,15 @@ window.addEventListener('load', ()=>{
 
       <div id="static_fields" class="hidden">
         <label>IP-адрес</label>
-        <input id="static_ip" value="${ES_IP}" placeholder="например: 192.168.1.10">
+        <input id="static_ip" value="${ES_IP}">
         <label>Маска</label>
-        <input id="static_mask" value="${ES_MASK}" placeholder="например: 255.255.255.0">
+        <input id="static_mask" value="${ES_MASK}">
         <label>Шлюз</label>
-        <input id="static_gw" value="${ES_GW}" placeholder="например: 192.168.1.1">
+        <input id="static_gw" value="${ES_GW}">
         <label>DNS 1</label>
-        <input id="static_dns1" value="${ES_DNS1}" placeholder="например: 1.1.1.1">
+        <input id="static_dns1" value="${ES_DNS1}">
         <label>DNS 2</label>
-        <input id="static_dns2" value="${ES_DNS2}" placeholder="например: 8.8.8.8">
+        <input id="static_dns2" value="${ES_DNS2}">
       </div>
 
       <div id="pppoe_fields" class="hidden">
@@ -883,7 +854,7 @@ window.addEventListener('load', ()=>{
         <input id="l2tp_user" value="${ES_USER}">
         <label>L2TP пароль</label>
         <input id="l2tp_pass" value="${ES_PASS}">
-        ${L2TP_NOTE}
+        <div class="hint" style="margin-top:10px">Логи автоустановок: <code>/tmp/atl_panel_opkg.log</code></div>
       </div>
 
       <div id="pptp_fields" class="hidden">
@@ -893,7 +864,7 @@ window.addEventListener('load', ()=>{
         <input id="pptp_user" value="${ES_USER}">
         <label>PPTP пароль</label>
         <input id="pptp_pass" value="${ES_PASS}">
-        ${PPTP_NOTE}
+        <div class="hint" style="margin-top:10px">Логи автоустановок: <code>/tmp/atl_panel_opkg.log</code></div>
       </div>
 
       <div class="row" style="margin-top:10px">
@@ -925,17 +896,17 @@ window.addEventListener('load', ()=>{
     </div>
 
     <div class="card">
-      <h2>🏠 Wi-Fi сети</h2>
+      <h2>🏠 Wi-Fi</h2>
       <div class="hint">SSID можно вводить с пробелами. Пароль — минимум 8 символов и без пробелов.</div>
 
-      <label>Название сети 2.4 ГГц (латиница, можно пробелы)</label>
+      <label>Название сети 2.4 ГГц</label>
       <input id="ssid_24" value="${ES_24_SSID}">
-      <label>Пароль 2.4 ГГц (латиница, минимум 8, без пробелов)</label>
+      <label>Пароль 2.4 ГГц</label>
       <input id="key_24" value="${ES_24_KEY}">
 
-      <label>Название сети 5 ГГц (латиница, можно пробелы)</label>
+      <label>Название сети 5 ГГц</label>
       <input id="ssid_5" value="${ES_5_SSID}">
-      <label>Пароль 5 ГГц (латиница, минимум 8, без пробелов)</label>
+      <label>Пароль 5 ГГц</label>
       <input id="key_5" value="${ES_5_KEY}">
 
       <div class="row" style="margin-top:10px">
@@ -973,6 +944,85 @@ window.addEventListener('load', ()=>{
 HTML
 PANELFILE
 
-chmod +x /www/cgi-bin/panel
+chmod +x "$PANEL"
+
+# =========================
+# Enable CGI + set / to panel (index_page), keep LuCI at /cgi-bin/luci
+# =========================
+uci -q set uhttpd.main.cgi_prefix='/cgi-bin'
+uci -q delete uhttpd.main.interpreter 2>/dev/null || true
+uci -q add_list uhttpd.main.interpreter='.sh=/bin/sh'
+uci -q set uhttpd.main.index_page='cgi-bin/panel'
+uci -q commit uhttpd
+
+cat <<'ROOT' > /www/index.html
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=/cgi-bin/panel">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Redirect</title></head><body>Redirecting… <a href="/cgi-bin/panel">Open</a></body></html>
+ROOT
+
+# =========================
+# Set Wi-Fi defaults: "Atlanta 2.4Ghz", "Atlanta 5Ghz", password "11111111"
+# =========================
+find_iface_by_radio() {
+  r="$1"
+  uci -q show wireless 2>/dev/null | awk -F'[.=]' -v R="$r" '
+    $1=="wireless" && $3=="device" && $0 ~ ("'\''"R"'\''") {print $2; exit}
+  '
+}
+
+SEC24="$(find_iface_by_radio radio0 || true)"
+SEC5="$(find_iface_by_radio radio1 || true)"
+
+# enable radios if present
+uci -q set wireless.radio0.disabled='0' 2>/dev/null || true
+uci -q set wireless.radio1.disabled='0' 2>/dev/null || true
+
+if [ -n "${SEC24:-}" ]; then
+  uci -q set wireless."$SEC24".mode='ap' 2>/dev/null || true
+  uci -q set wireless."$SEC24".ssid="$WIFI_SSID_24"
+  uci -q set wireless."$SEC24".encryption='psk2'
+  uci -q set wireless."$SEC24".key="$WIFI_KEY"
+  uci -q set wireless."$SEC24".disabled='0' 2>/dev/null || true
+else
+  # fallback to default_radio0 if exists
+  if uci -q get wireless.default_radio0 >/dev/null 2>&1; then
+    uci -q set wireless.default_radio0.ssid="$WIFI_SSID_24"
+    uci -q set wireless.default_radio0.encryption='psk2'
+    uci -q set wireless.default_radio0.key="$WIFI_KEY"
+    uci -q set wireless.default_radio0.disabled='0' 2>/dev/null || true
+  fi
+fi
+
+if [ -n "${SEC5:-}" ]; then
+  uci -q set wireless."$SEC5".mode='ap' 2>/dev/null || true
+  uci -q set wireless."$SEC5".ssid="$WIFI_SSID_5"
+  uci -q set wireless."$SEC5".encryption='psk2'
+  uci -q set wireless."$SEC5".key="$WIFI_KEY"
+  uci -q set wireless."$SEC5".disabled='0' 2>/dev/null || true
+else
+  if uci -q get wireless.default_radio1 >/dev/null 2>&1; then
+    uci -q set wireless.default_radio1.ssid="$WIFI_SSID_5"
+    uci -q set wireless.default_radio1.encryption='psk2'
+    uci -q set wireless.default_radio1.key="$WIFI_KEY"
+    uci -q set wireless.default_radio1.disabled='0' 2>/dev/null || true
+  fi
+fi
+
+uci -q commit wireless 2>/dev/null || true
+
+# apply
+wifi reload >/dev/null 2>&1 || wifi up >/dev/null 2>&1 || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
-echo "OK"
+
+echo "--- OK ---"
+echo "Открой: http://192.168.1.1/"
+echo "Панель: /cgi-bin/panel"
+echo "LuCI: /cgi-bin/luci"
+echo "Доступ панели по умолчанию: admin / admin"
+echo "Wi-Fi 2.4: $WIFI_SSID_24  пароль: $WIFI_KEY"
+echo "Wi-Fi 5:   $WIFI_SSID_5  пароль: $WIFI_KEY"
+EOF
+
+sh /tmp/install_atlanta_panel_ru_clean.sh
