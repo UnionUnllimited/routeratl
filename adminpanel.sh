@@ -49,6 +49,8 @@ L2TP_LOCK="/tmp/atl_panel_l2tp_install.lock"
 PPTP_LOCK="/tmp/atl_panel_pptp_install.lock"
 touch "$LOG" "$OPKG_LOG" 2>/dev/null || true
 chmod 666 "$LOG" "$OPKG_LOG" 2>/dev/null || true
+# --- Mobile UI fix (nav doesn't overlap content) ---
+grep -q "MOBILE_NAV_FIX_V1" "$PANEL" || sed -i 's#</style>#\n/* MOBILE_NAV_FIX_V1 */\n@media (max-width: 520px){\n  .wrap{padding-bottom: calc(18px + env(safe-area-inset-bottom) + 190px)}\n  .nav{\n    left:10px; right:10px; bottom:10px;\n    padding:10px;\n    gap:8px;\n    display:grid;\n    grid-template-columns: 1fr 1fr;\n    align-items:stretch;\n  }\n  .nav a,.nav button{\n    width:100%;\n    min-height:48px;\n    padding:12px 10px;\n    font-size:13px;\n    line-height:1.15;\n    white-space:normal;\n    text-align:center;\n  }\n  .nav a:last-child,.nav button:last-child{grid-column: 1 / -1}\n}\n</style>#' "$PANEL"
 
 html_escape(){ sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'; }
 strip_newlines(){ tr -d '\r\n'; }
