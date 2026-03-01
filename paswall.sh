@@ -1,4 +1,3 @@
-cat >/tmp/atlanta_passwall_auto.sh <<'EOF'
 #!/bin/sh
 set -eu
 
@@ -193,6 +192,3 @@ tprint "${GREEN}[Atlanta] Готово.${NC}"
 tprint "${CYAN}Subscribe URL:${NC} $(uci -q get passwall.@subscribe_list[0].url 2>/dev/null || echo '?')"
 tprint "${CYAN}Rules log:${NC} tail -n 60 $RULES_LOG 2>/dev/null || true"
 tprint "${CYAN}Subscribe log:${NC} tail -n 60 $SUB_LOG 2>/dev/null || true"
-EOF
-chmod +x /tmp/atlanta_passwall_auto.sh
-sh /tmp/atlanta_passwall_auto.sh
