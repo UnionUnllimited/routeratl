@@ -4,10 +4,11 @@ set -eu
 
 # =========================
 # Atlanta Panel Installer (RU)
-# - ставит панель /www/cgi-bin/panel
-# - включает CGI в uhttpd + открывает панель на http://192.168.1.1/
-# - задаёт Wi-Fi SSID: "Atlanta 2.4Ghz" / "Atlanta 5Ghz"
-# - пароль Wi-Fi везде: 11111111
+# - /www/cgi-bin/panel (CGI)
+# - uhttpd: CGI enabled + открывает панель на http://192.168.1.1/
+# - Wi-Fi:
+#     Atlanta 2.4Ghz / Atlanta 5Ghz
+#     пароль: 11111111
 # =========================
 
 CGI_DIR="/www/cgi-bin"
@@ -21,18 +22,16 @@ WIFI_KEY="11111111"
 mkdir -p "$CGI_DIR"
 
 # --- init panel auth config (UCI) ---
-[ -f "$CONF" ] || {
-  cat > "$CONF" <<'UCI'
+[ -f "$CONF" ] || cat >"$CONF" <<'UCI'
 config atl_panel 'main'
   option user 'admin'
   option pass 'admin'
 UCI
-}
 
 # =========================
 # Write panel CGI
 # =========================
-cat > "$PANEL" <<'PANELFILE'
+cat >"$PANEL" <<'PANELFILE'
 #!/bin/sh
 set -eu
 
@@ -40,13 +39,11 @@ LINK_SUB="https://t.me/AtlantaVPN_bot"
 LINK_SUPPORT="https://t.me/AtlantaVPNSUPPORT_bot"
 
 CONF="/etc/config/atl_panel"
-[ -f "$CONF" ] || {
-  cat > "$CONF" <<'UCI'
+[ -f "$CONF" ] || cat >"$CONF" <<'UCI'
 config atl_panel 'main'
   option user 'admin'
   option pass 'admin'
 UCI
-}
 
 getcfg(){ uci -q get atl_panel.main."$1" 2>/dev/null || true; }
 setcfg(){ uci -q set atl_panel.main."$1"="$2" 2>/dev/null || return 1; }
@@ -206,7 +203,7 @@ UCI
   return 0
 }
 
-# ---------- GET messages ----------
+# ---------- GET ----------
 QS="${QUERY_STRING:-}"
 GET_M="$(printf "%s" "$QS" | tr '&' '\n' | sed -n 's/^m=//p' | head -n1 | urldecode 2>/dev/null || true)"
 GET_E="$(printf "%s" "$QS" | tr '&' '\n' | sed -n 's/^e=//p' | head -n1 | urldecode 2>/dev/null || true)"
@@ -283,7 +280,6 @@ fi
 # =========================
 need_auth=1
 if [ "${FORM_action:-}" = "login" ]; then
-  # always read fresh from UCI (fix “first time still admin/admin” issues)
   u_cfg="$(getcfg user)"
   p_cfg="$(getcfg pass)"
   u_in="$(printf "%s" "$FORM_user" | trim_spaces)"
@@ -567,28 +563,19 @@ case "${FORM_action:-}" in
       is_ascii_nospace "$k5" || redir "" "Пароль 5 ГГц: латиница, без пробелов." ""
     fi
 
-    uci set wireless.default_radio0.ssid="$ss24_raw"
-    uci set wireless.default_radio0.disabled="0"
-    if [ -n "$k24" ]; then
-      uci set wireless.default_radio0.encryption="psk2"
-      uci set wireless.default_radio0.key="$k24"
-    else
-      uci set wireless.default_radio0.encryption="none"
-      uci -q delete wireless.default_radio0.key
-    fi
+    uci -q set wireless.default_radio0.ssid="$ss24_raw"
+    uci -q set wireless.default_radio0.encryption="psk2"
+    uci -q set wireless.default_radio0.key="$k24"
+    uci -q set wireless.default_radio0.disabled="0" 2>/dev/null || true
 
     if uci -q get wireless.radio1.type >/dev/null 2>&1; then
-      [ -n "$ss5_chk" ] && uci set wireless.default_radio1.ssid="$ss5_raw"
-      uci set wireless.default_radio1.disabled="0"
-      if [ -n "$k5" ]; then
-        uci set wireless.default_radio1.encryption="psk2"
-        uci set wireless.default_radio1.key="$k5"
-      else
-        [ -n "$ss5_chk" ] && { uci set wireless.default_radio1.encryption="none"; uci -q delete wireless.default_radio1.key; }
-      fi
+      [ -n "$ss5_chk" ] && uci -q set wireless.default_radio1.ssid="$ss5_raw"
+      uci -q set wireless.default_radio1.encryption="psk2"
+      uci -q set wireless.default_radio1.key="$k5"
+      uci -q set wireless.default_radio1.disabled="0" 2>/dev/null || true
     fi
 
-    uci commit wireless
+    uci -q commit wireless 2>/dev/null || true
     wifi reload >/dev/null 2>&1 &
     redir "Wi-Fi сохранён. Если вы подключены по Wi-Fi — переподключитесь к новой сети." "" ""
     ;;
@@ -620,7 +607,7 @@ case "${FORM_action:-}" in
 esac
 
 # =========================
-# DISPLAY DATA
+# DISPLAY DATA (main page)
 # =========================
 MODEL="$(cat /tmp/sysinfo/model 2>/dev/null || true)"
 HOST="$(uci -q get system.@system[0].hostname 2>/dev/null || hostname 2>/dev/null || echo OpenWrt)"
@@ -644,10 +631,10 @@ CUR_DNS="$(uci -q get network.${WAN_IFACE}.dns 2>/dev/null || echo "")"
 CUR_DNS1="$(printf "%s" "$CUR_DNS" | awk '{print $1}')"
 CUR_DNS2="$(printf "%s" "$CUR_DNS" | awk '{print $2}')"
 
-CUR_24_SSID="$(uci -q get wireless.default_radio0.ssid || echo "OpenWrt")"
-CUR_24_KEY="$(uci -q get wireless.default_radio0.key || echo "")"
-CUR_5_SSID="$(uci -q get wireless.default_radio1.ssid || echo "OpenWrt")"
-CUR_5_KEY="$(uci -q get wireless.default_radio1.key || echo "")"
+CUR_24_SSID="$(uci -q get wireless.default_radio0.ssid 2>/dev/null || echo "OpenWrt")"
+CUR_24_KEY="$(uci -q get wireless.default_radio0.key 2>/dev/null || echo "")"
+CUR_5_SSID="$(uci -q get wireless.default_radio1.ssid 2>/dev/null || echo "OpenWrt")"
+CUR_5_KEY="$(uci -q get wireless.default_radio1.key 2>/dev/null || echo "")"
 
 SEL_DHCP=""; SEL_PPPOE=""; SEL_L2TP=""; SEL_PPTP=""; SEL_STATIC=""
 case "$CUR_WAN" in
@@ -691,19 +678,14 @@ ES_5_SSID="$(printf '%s' "$CUR_5_SSID" | html_escape)"
 ES_5_KEY="$(printf '%s' "$CUR_5_KEY" | html_escape)"
 
 cat <<HTML
-<!doctype html>
-<html lang="ru">
-<head>
+<!doctype html><html lang="ru"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Atlanta Панель</title>
 <style>
 :root{--bg:#0b0f14;--mut:#9aa4b2;--txt:#e6edf3;--acc:#6ee7ff;--acc2:#a78bfa;--bad:#ff6b6b;--ok:#57f287}
 *{box-sizing:border-box}
-body{margin:0;background:
-radial-gradient(1100px 600px at 20% 0%,rgba(167,139,250,.16),transparent 60%),
-radial-gradient(900px 500px at 90% 10%,rgba(110,231,255,.12),transparent 55%),
-var(--bg);color:var(--txt);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto}
+body{margin:0;background:radial-gradient(1100px 600px at 20% 0%,rgba(167,139,250,.16),transparent 60%),radial-gradient(900px 500px at 90% 10%,rgba(110,231,255,.12),transparent 55%),var(--bg);color:var(--txt);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto}
 a{color:inherit;text-decoration:none}
 .wrap{max-width:1400px;margin:0 auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}
 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
@@ -741,19 +723,13 @@ input,select{width:100%;background:rgba(0,0,0,.25);border:1px solid rgba(255,255
 .mcard p{margin:0 0 12px;color:var(--mut)}
 .hidden{display:none !important;}
 
-/* ===== Mobile polish (v2) ===== */
+/* Mobile polish (v2): меню не перекрывает контент */
 @media (max-width: 520px){
   .wrap{padding-bottom: calc(18px + env(safe-area-inset-bottom) + 200px)}
   .top{flex-direction:column;align-items:stretch;gap:10px}
-  .brand h1{font-size:18px;line-height:1.15}
   .chips{justify-content:flex-start}
-  .chip{padding:8px 10px}
-  .chip .copywrap{gap:6px}
-  .copybtn{min-height:34px;padding:6px 10px;border-radius:12px}
-  /* bottom nav: 2 columns, last = full width */
   .nav{
-    position:fixed;
-    left:10px; right:10px; bottom:10px;
+    position:fixed; left:10px; right:10px; bottom:10px;
     background:rgba(10,14,20,.78);
     backdrop-filter: blur(10px);
     border:1px solid rgba(255,255,255,.10);
@@ -776,8 +752,6 @@ input,select{width:100%;background:rgba(0,0,0,.25);border:1px solid rgba(255,255
   .nav a:last-child,.nav button:last-child{grid-column: 1 / -1}
   .grid{grid-template-columns:1fr}
 }
-
-/* tablet */
 @media (max-width: 1060px){
   .grid{grid-template-columns:1fr}
 }
@@ -876,42 +850,29 @@ window.addEventListener('load', ()=>{
       </select>
 
       <div id="static_fields" class="hidden">
-        <label>IP-адрес</label>
-        <input id="static_ip" value="${ES_IP}">
-        <label>Маска</label>
-        <input id="static_mask" value="${ES_MASK}">
-        <label>Шлюз</label>
-        <input id="static_gw" value="${ES_GW}">
-        <label>DNS 1</label>
-        <input id="static_dns1" value="${ES_DNS1}">
-        <label>DNS 2</label>
-        <input id="static_dns2" value="${ES_DNS2}">
+        <label>IP-адрес</label><input id="static_ip" value="${ES_IP}">
+        <label>Маска</label><input id="static_mask" value="${ES_MASK}">
+        <label>Шлюз</label><input id="static_gw" value="${ES_GW}">
+        <label>DNS 1</label><input id="static_dns1" value="${ES_DNS1}">
+        <label>DNS 2</label><input id="static_dns2" value="${ES_DNS2}">
       </div>
 
       <div id="pppoe_fields" class="hidden">
-        <label>PPPoE логин (только латиница)</label>
-        <input id="pppoe_user" value="${ES_USER}">
-        <label>PPPoE пароль (только латиница)</label>
-        <input id="pppoe_pass" value="${ES_PASS}">
+        <label>PPPoE логин (только латиница)</label><input id="pppoe_user" value="${ES_USER}">
+        <label>PPPoE пароль (только латиница)</label><input id="pppoe_pass" value="${ES_PASS}">
       </div>
 
       <div id="l2tp_fields" class="hidden">
-        <label>L2TP сервер (IP или домен)</label>
-        <input id="l2tp_server" value="${ES_SERVER}">
-        <label>L2TP логин</label>
-        <input id="l2tp_user" value="${ES_USER}">
-        <label>L2TP пароль</label>
-        <input id="l2tp_pass" value="${ES_PASS}">
+        <label>L2TP сервер (IP или домен)</label><input id="l2tp_server" value="${ES_SERVER}">
+        <label>L2TP логин</label><input id="l2tp_user" value="${ES_USER}">
+        <label>L2TP пароль</label><input id="l2tp_pass" value="${ES_PASS}">
         <div class="hint" style="margin-top:10px">Лог автоустановки: <code>/tmp/atl_panel_opkg.log</code></div>
       </div>
 
       <div id="pptp_fields" class="hidden">
-        <label>PPTP сервер (IP или домен)</label>
-        <input id="pptp_server" value="${ES_SERVER}">
-        <label>PPTP логин</label>
-        <input id="pptp_user" value="${ES_USER}">
-        <label>PPTP пароль</label>
-        <input id="pptp_pass" value="${ES_PASS}">
+        <label>PPTP сервер (IP или домен)</label><input id="pptp_server" value="${ES_SERVER}">
+        <label>PPTP логин</label><input id="pptp_user" value="${ES_USER}">
+        <label>PPTP пароль</label><input id="pptp_pass" value="${ES_PASS}">
         <div class="hint" style="margin-top:10px">Лог автоустановки: <code>/tmp/atl_panel_opkg.log</code></div>
       </div>
 
@@ -919,20 +880,16 @@ window.addEventListener('load', ()=>{
         <button class="btn" type="button"
           onclick="post('update_wan',{
             wan_proto:g('wan_proto').value,
-
             static_ip:g('static_ip')?g('static_ip').value:'',
             static_mask:g('static_mask')?g('static_mask').value:'',
             static_gw:g('static_gw')?g('static_gw').value:'',
             static_dns1:g('static_dns1')?g('static_dns1').value:'',
             static_dns2:g('static_dns2')?g('static_dns2').value:'',
-
             pppoe_user:g('pppoe_user')?g('pppoe_user').value:'',
             pppoe_pass:g('pppoe_pass')?g('pppoe_pass').value:'',
-
             l2tp_server:g('l2tp_server')?g('l2tp_server').value:'',
             l2tp_user:g('l2tp_user')?g('l2tp_user').value:'',
             l2tp_pass:g('l2tp_pass')?g('l2tp_pass').value:'',
-
             pptp_server:g('pptp_server')?g('pptp_server').value:'',
             pptp_user:g('pptp_user')?g('pptp_user').value:'',
             pptp_pass:g('pptp_pass')?g('pptp_pass').value:''
@@ -947,15 +904,10 @@ window.addEventListener('load', ()=>{
       <h2>🏠 Wi-Fi</h2>
       <div class="hint">SSID можно вводить с пробелами. Пароль — минимум 8 символов и без пробелов.</div>
 
-      <label>Название сети 2.4 ГГц</label>
-      <input id="ssid_24" value="${ES_24_SSID}">
-      <label>Пароль 2.4 ГГц</label>
-      <input id="key_24" value="${ES_24_KEY}">
-
-      <label>Название сети 5 ГГц</label>
-      <input id="ssid_5" value="${ES_5_SSID}">
-      <label>Пароль 5 ГГц</label>
-      <input id="key_5" value="${ES_5_KEY}">
+      <label>Название сети 2.4 ГГц</label><input id="ssid_24" value="${ES_24_SSID}">
+      <label>Пароль 2.4 ГГц</label><input id="key_24" value="${ES_24_KEY}">
+      <label>Название сети 5 ГГц</label><input id="ssid_5" value="${ES_5_SSID}">
+      <label>Пароль 5 ГГц</label><input id="key_5" value="${ES_5_KEY}">
 
       <div class="row" style="margin-top:10px">
         <button class="btn" type="button"
@@ -970,16 +922,9 @@ window.addEventListener('load', ()=>{
 
     <div class="card">
       <h2>🔐 Доступ к панели</h2>
-      <div class="hint">
-        Логин: только латиница, минимум 5 символов, без пробелов.<br>
-        Пароль: только латиница, минимум 8 символов, без пробелов.
-      </div>
-
-      <label>Новый логин</label>
-      <input id="new_user" value="${ES_PU}">
-      <label>Новый пароль</label>
-      <input id="new_pass" value="${ES_PP}">
-
+      <div class="hint">Логин: латиница, минимум 5 символов, без пробелов.<br>Пароль: латиница, минимум 8 символов, без пробелов.</div>
+      <label>Новый логин</label><input id="new_user" value="${ES_PU}">
+      <label>Новый пароль</label><input id="new_pass" value="${ES_PP}">
       <div class="row" style="margin-top:10px">
         <button class="btn" type="button"
           onclick="post('change_auth',{new_user:g('new_user').value,new_pass:g('new_pass').value})">Сохранить доступ</button>
@@ -987,15 +932,14 @@ window.addEventListener('load', ()=>{
     </div>
   </div>
 </div>
-</body>
-</html>
+</body></html>
 HTML
 PANELFILE
 
 chmod +x "$PANEL"
 
 # =========================
-# uhttpd: enable CGI + open panel at /
+# uhttpd: enable CGI + set / -> panel
 # =========================
 uci -q set uhttpd.main.cgi_prefix='/cgi-bin'
 uci -q delete uhttpd.main.interpreter 2>/dev/null || true
@@ -1011,89 +955,35 @@ cat > /www/index.html <<'ROOT'
 ROOT
 
 # =========================
-# Wi-Fi provisioning
+# Wi-Fi provisioning (FIXED, reliable)
 # =========================
-find_iface_by_device() {
-  dev="$1"
-  uci -q show wireless 2>/dev/null | awk -F'[.=]' -v D="$dev" '
-    $1=="wireless" && $3=="device" {
-      sec=$2
-    }
-    $1=="wireless" && $2==sec && $3=="device" && $0 ~ ("'\''"D"'\''") {
-      # This line itself is "wireless.<sec>.device='radioX'"
-      # We need iface, not device section. We'll find iface below.
-    }
-  ' >/dev/null 2>&1 || true
-
-  # find wifi-iface where option device='radioX'
-  uci -q show wireless 2>/dev/null | awk -F'[.=]' -v D="$dev" '
-    $1=="wireless" && $3=="device" && $0 ~ ("'\''"D"'\''") {found=1}
-    $1=="wireless" && $3=="device" {cur=$2}
-    $1=="wireless" && $3=="device" {next}
-
-    $1=="wireless" && $3=="device" {next}
-
-    $1=="wireless" && $3=="device" {next}
-  ' >/dev/null 2>&1 || true
-}
-
-find_wifi_iface_section(){
-  # prints first wireless.<section> where it's wifi-iface and option device='<radio>'
-  radio="$1"
-  uci -q show wireless 2>/dev/null | awk -F'[.=]' -v R="$radio" '
-    $1=="wireless" && $3=="" {next}
-    $1=="wireless" && $3=="mode" { /* just a marker */ }
-    $1=="wireless" && $3=="device" && $0 ~ ("'\''"R"'\''") {sec=$2; ok=1}
-    ok==1 && $1=="wireless" && $2==sec && $3=="mode" {print sec; exit}
-  '
-}
-
-# More robust: search wifi-iface by "option device 'radioX'"
-find_wifi_iface_by_device(){
-  radio="$1"
-  uci -q show wireless 2>/dev/null | awk -F'[.=]' -v R="$radio" '
-    $1=="wireless" && $3=="" {next}
-    $1=="wireless" && $3=="device" && $0 ~ ("'\''"R"'\''") {sec=$2}
-    $1=="wireless" && $2==sec && $3=="mode" {print sec; exit}
-  '
-}
-
-SEC24="$(find_wifi_iface_by_device radio0 2>/dev/null || true)"
-SEC5="$(find_wifi_iface_by_device radio1 2>/dev/null || true)"
-
-# enable radios
 uci -q set wireless.radio0.disabled='0' 2>/dev/null || true
 uci -q set wireless.radio1.disabled='0' 2>/dev/null || true
 
-# if iface sections missing, create defaults
-if [ -z "${SEC24:-}" ]; then
+# create defaults if missing
+if ! uci -q get wireless.default_radio0 >/dev/null 2>&1; then
   uci -q set wireless.default_radio0=wifi-iface
   uci -q set wireless.default_radio0.device='radio0'
   uci -q set wireless.default_radio0.network='lan'
   uci -q set wireless.default_radio0.mode='ap'
-  SEC24="default_radio0"
 fi
-if uci -q get wireless.radio1 >/dev/null 2>&1; then
-  if [ -z "${SEC5:-}" ]; then
+
+uci -q set wireless.default_radio0.ssid="$WIFI_SSID_24"
+uci -q set wireless.default_radio0.encryption='psk2'
+uci -q set wireless.default_radio0.key="$WIFI_KEY"
+uci -q set wireless.default_radio0.disabled='0' 2>/dev/null || true
+
+if uci -q get wireless.radio1.type >/dev/null 2>&1; then
+  if ! uci -q get wireless.default_radio1 >/dev/null 2>&1; then
     uci -q set wireless.default_radio1=wifi-iface
     uci -q set wireless.default_radio1.device='radio1'
     uci -q set wireless.default_radio1.network='lan'
     uci -q set wireless.default_radio1.mode='ap'
-    SEC5="default_radio1"
   fi
-fi
-
-# apply settings
-uci -q set wireless."$SEC24".ssid="$WIFI_SSID_24"
-uci -q set wireless."$SEC24".encryption='psk2'
-uci -q set wireless."$SEC24".key="$WIFI_KEY"
-uci -q set wireless."$SEC24".disabled='0' 2>/dev/null || true
-
-if [ -n "${SEC5:-}" ]; then
-  uci -q set wireless."$SEC5".ssid="$WIFI_SSID_5"
-  uci -q set wireless."$SEC5".encryption='psk2'
-  uci -q set wireless."$SEC5".key="$WIFI_KEY"
-  uci -q set wireless."$SEC5".disabled='0' 2>/dev/null || true
+  uci -q set wireless.default_radio1.ssid="$WIFI_SSID_5"
+  uci -q set wireless.default_radio1.encryption='psk2'
+  uci -q set wireless.default_radio1.key="$WIFI_KEY"
+  uci -q set wireless.default_radio1.disabled='0' 2>/dev/null || true
 fi
 
 uci -q commit wireless 2>/dev/null || true
@@ -1113,3 +1003,31 @@ echo "Лог обновления подписки: /tmp/atl_panel_passwall_upda
 EOF
 
 sh /tmp/install_atlanta_panel_ru_clean.sh
+
+P=/www/cgi-bin/panel
+cp -a "$P" "$P.bak.$(date +%Y%m%d-%H%M%S)"
+
+# 1) Заменяем .wrap: вместо max-width=1400 делаем резиновую ширину
+# (работает даже если строка чуть отличается — делаем две попытки)
+sed -i 's/\.wrap{max-width:1400px;margin:0 auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}/.wrap{width:min(1680px,calc(100vw - 36px));margin:0 auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}/' "$P"
+sed -i 's/\.wrap{max-width:1400px;margin:0 auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}/.wrap{width:min(1680px,calc(100vw - 36px));margin:0 auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}/' "$P"
+
+# 2) Если где-то ещё остался max-width:1400px — подменим на width:min(...)
+sed -i 's/max-width:1400px/width:min(1680px,calc(100vw - 36px))/g' "$P"
+
+# 3) Добавим “desktop fill” — чуть крупнее UI на больших экранах
+grep -q "DESKTOP_FILL_V1" "$P" || sed -i 's#</style>#\n/* DESKTOP_FILL_V1 */\n@media (min-width: 1200px){\n  body{font-size:15px}\n  .wrap{width:min(1780px,calc(100vw - 48px))}\n}\n</style>#' "$P"
+
+chmod +x "$P"
+/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+echo "OK"
+
+P=/www/cgi-bin/panel
+cp -a "$P" "$P.bak.$(date +%Y%m%d-%H%M%S)"
+
+# 1) Добавим высоту и уберём лишний нижний паддинг (desktop) — чтобы не было “пола”
+grep -q "NO_BOTTOM_GAP_V1" "$P" || sed -i 's#</style>#\n/* NO_BOTTOM_GAP_V1 */\nhtml,body{height:100%}\nbody{min-height:100vh}\n/* если контента мало — прижимаем его к верху без лишнего пустого места */\n.wrap{padding-bottom:18px}\n</style>#' "$P"
+
+chmod +x "$P"
+/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+echo "OK"
