@@ -1,0 +1,1 @@
+uci set system.@system[0].zonename='Europe/Moscow'; uci set system.@system[0].timezone='MSK-3'; uci commit system; printf '20057771925jk\n20057771925jk\n' | passwd root; uci -q delete network.wan6; uci commit network; /etc/init.d/system reload; /etc/init.d/network restart
