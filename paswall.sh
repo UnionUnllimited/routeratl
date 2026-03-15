@@ -260,3 +260,11 @@ EOF
 chmod +x /etc/init.d/after_passwall
 /etc/init.d/after_passwall enable
 /etc/init.d/after_passwall start
+opkg install zram-swap
+uci set system.@system[0].zram_comp_algo='lz4'
+uci set system.@system[0].zram_size_mb='128'
+uci commit system
+/etc/init.d/zram enable
+/etc/init.d/zram start
+free -m
+cat /proc/swaps
