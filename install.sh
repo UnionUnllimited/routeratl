@@ -11,7 +11,7 @@ TMP_SCRIPT="/tmp/gh_script_installer.sh"
 PASSWALL_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/paswall.sh"
 ZAPRET_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/zapret.sh"
 FRP_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/frp.sh"
-TIME_URL=""
+TIME_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/time.sh"
 ADMIN_URL="https://raw.githubusercontent.com/UnionUnllimited/routeratl/refs/heads/main/adminpanel.sh"
 
 usage() {
