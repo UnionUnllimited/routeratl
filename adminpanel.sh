@@ -2179,36 +2179,21 @@ printf "${CG}╚═════════════════════�
 EOF
 
 sh /tmp/install_atlanta_panel_v2.sh
+cat > /tmp/install_mac_page.sh << 'EOF'
 #!/bin/sh
-# ════════════════════════════════════════════════════════════════
-#  Atlanta Router — MAC Page Installer
-#  Устанавливает страницу atlanta.lan/my-mac/
-#  Показывает MAC-адрес роутера с кнопкой копирования
-# ════════════════════════════════════════════════════════════════
-
-C0='\033[0m'; CB='\033[1;36m'; CG='\033[1;32m'; CY='\033[1;33m'
+C0='\033[0m'; CB='\033[1;36m'; CG='\033[1;32m'
 step(){ printf "${CB}━━━ %s ━━━${C0}\n" "$*"; }
 ok(){   printf "  ${CG}✔  %s${C0}\n" "$*"; }
 
-printf '\n'
-printf "${CB}╔══════════════════════════════════════════╗${C0}\n"
-printf "${CB}║     🛡  Atlanta Router — MAC Page         ║${C0}\n"
-printf "${CB}╚══════════════════════════════════════════╝${C0}\n\n"
-
-# ── Создаём директорию ─────────────────────────────────────────
 step "Создаём /www/my-mac/"
 mkdir -p /www/my-mac
-ok "Директория готова"
 
-# ── CGI-скрипт страницы ────────────────────────────────────────
 step "Записываем CGI-скрипт"
 cat > /www/cgi-bin/my-mac << 'CGISCRIPT'
 #!/bin/sh
 set -eu
-
 MAC="$(cat /sys/class/net/br-lan/address 2>/dev/null | tr '[:lower:]' '[:upper:]' || echo 'N/A')"
 ES_MAC="$(printf '%s' "$MAC" | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g')"
-
 echo "Content-type: text/html; charset=utf-8"
 echo ""
 cat << HTML
@@ -2221,154 +2206,48 @@ cat << HTML
 <style>
 :root{--acc:#0ab3ff;--acc2:#0070f0;--acc3:#0046c0;--ok:#27c97a}
 *{box-sizing:border-box;margin:0;padding:0}
-body{
-  min-height:100vh;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  background:
-    radial-gradient(ellipse 120% 60% at 50% 0%,rgba(10,179,255,.15),transparent 55%),
-    radial-gradient(ellipse 80% 40% at 80% 80%,rgba(0,70,192,.1),transparent 50%),
-    #000;
-  color:#f0f4ff;
-  font:14px/1.5 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-  padding:24px 16px;
-}
-.logo{
-  font-size:48px;font-weight:800;letter-spacing:-2px;
-  background:linear-gradient(135deg,var(--acc),var(--acc2));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-  margin-bottom:6px;text-align:center;line-height:1.1;
-}
-.logo-sub{
-  font-size:13px;color:rgba(240,244,255,.45);
-  text-align:center;margin-bottom:32px;
-}
-.card{
-  width:100%;max-width:420px;
-  background:rgba(255,255,255,.05);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:22px;padding:28px 24px;
-  box-shadow:0 24px 64px rgba(0,0,0,.6);
-  animation:fu .4s ease both;
-  display:flex;flex-direction:column;align-items:center;gap:20px;
-}
+body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse 120% 60% at 50% 0%,rgba(10,179,255,.15),transparent 55%),radial-gradient(ellipse 80% 40% at 80% 80%,rgba(0,70,192,.1),transparent 50%),#000;color:#f0f4ff;font:14px/1.5 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;padding:24px 16px}
+.logo{font-size:48px;font-weight:800;letter-spacing:-2px;background:linear-gradient(135deg,var(--acc),var(--acc2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px;text-align:center;line-height:1.1}
+.logo-sub{font-size:13px;color:rgba(240,244,255,.45);text-align:center;margin-bottom:32px}
+.card{width:100%;max-width:420px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:22px;padding:28px 24px;box-shadow:0 24px 64px rgba(0,0,0,.6);animation:fu .4s ease both;display:flex;flex-direction:column;align-items:center;gap:20px}
 @keyframes fu{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-.label{
-  font-size:11px;font-weight:700;text-transform:uppercase;
-  letter-spacing:.8px;color:rgba(240,244,255,.4);
-  text-align:center;
-}
-.mac-display{
-  display:flex;align-items:center;justify-content:center;gap:12px;
-  background:rgba(255,255,255,.07);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:14px;padding:16px 20px;
-  width:100%;
-}
-.mac-value{
-  font-size:22px;font-weight:800;
-  font-family:'SF Mono',ui-monospace,'Cascadia Code',monospace;
-  letter-spacing:2px;
-  background:linear-gradient(135deg,var(--acc),#fff);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-  white-space:nowrap;
-  word-break:break-all;
-}
-.copy-btn{
-  flex-shrink:0;
-  width:44px;height:44px;
-  border:1px solid rgba(255,255,255,.15);
-  background:rgba(255,255,255,.08);
-  color:#f0f4ff;border-radius:10px;
-  cursor:pointer;font-size:20px;
-  display:flex;align-items:center;justify-content:center;
-  transition:background .15s,transform .1s;
-  touch-action:manipulation;
-}
+.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:rgba(240,244,255,.4);text-align:center}
+.mac-display{display:flex;align-items:center;justify-content:center;gap:12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:16px 20px;width:100%}
+.mac-value{font-size:22px;font-weight:800;font-family:'SF Mono',ui-monospace,monospace;letter-spacing:2px;background:linear-gradient(135deg,var(--acc),#fff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;white-space:nowrap;word-break:break-all}
+.copy-btn{flex-shrink:0;width:44px;height:44px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#f0f4ff;border-radius:10px;cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;transition:background .15s,transform .1s;touch-action:manipulation}
 .copy-btn:hover{background:rgba(255,255,255,.16)}
 .copy-btn:active{transform:scale(.9)}
 .copy-btn.done{background:rgba(39,201,122,.15);border-color:rgba(39,201,122,.3);color:#27c97a}
-.hint{
-  font-size:12px;color:rgba(240,244,255,.3);
-  text-align:center;line-height:1.6;
-}
+.hint{font-size:12px;color:rgba(240,244,255,.3);text-align:center;line-height:1.6}
 .hint b{color:rgba(240,244,255,.6);font-weight:600}
-.divider{
-  width:100%;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent);
-}
-.links{
-  display:flex;gap:10px;width:100%;
-}
-.link-btn{
-  flex:1;border:1px solid rgba(255,255,255,.1);border-radius:11px;
-  padding:11px;font-size:13px;font-weight:600;
-  background:rgba(255,255,255,.06);color:#f0f4ff;
-  cursor:pointer;text-align:center;text-decoration:none;
-  display:flex;align-items:center;justify-content:center;gap:6px;
-  transition:background .15s;min-height:44px;
-}
+.divider{width:100%;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent)}
+.links{display:flex;gap:10px;width:100%}
+.link-btn{flex:1;border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:11px;font-size:13px;font-weight:600;background:rgba(255,255,255,.06);color:#f0f4ff;cursor:pointer;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s;min-height:44px}
 .link-btn:hover{background:rgba(255,255,255,.12)}
-.link-btn.primary{
-  background:linear-gradient(135deg,var(--acc),var(--acc2),var(--acc3));
-  color:#fff;border:0;
-  box-shadow:0 4px 16px rgba(10,179,255,.2);
-}
+.link-btn.primary{background:linear-gradient(135deg,var(--acc),var(--acc2),var(--acc3));color:#fff;border:0;box-shadow:0 4px 16px rgba(10,179,255,.2)}
 .link-btn.primary:hover{opacity:.9}
-@media(max-width:480px){
-  .mac-value{font-size:16px;letter-spacing:1px}
-  .logo{font-size:36px}
-}
+@media(max-width:480px){.mac-value{font-size:16px;letter-spacing:1px}.logo{font-size:36px}}
 </style>
 </head>
 <body>
-
 <div class="logo">Atlanta Router</div>
 <div class="logo-sub">Ваш роутер</div>
-
 <div class="card">
   <div class="label">MAC-адрес роутера</div>
-
   <div class="mac-display">
     <span class="mac-value" id="macval">${ES_MAC}</span>
     <button class="copy-btn" id="copybtn" onclick="copyMac()" title="Скопировать">📋</button>
   </div>
-
-  <div class="hint">
-    MAC-адрес нужен для идентификации вашего роутера.<br>
-    Используется при обращении в <b>поддержку</b>.
-  </div>
-
+  <div class="hint">MAC-адрес нужен для идентификации вашего роутера.<br>Используется при обращении в <b>поддержку</b>.</div>
   <div class="divider"></div>
-
   <div class="links">
     <a class="link-btn primary" href="/cgi-bin/panel">🛡 Панель</a>
     <a class="link-btn" href="https://t.me/AtlantaVPNSUPPORT_bot" target="_blank" rel="noopener">🎧 Поддержка</a>
   </div>
 </div>
-
 <script>
-function copyMac(){
-  var val=document.getElementById('macval').textContent.trim();
-  var btn=document.getElementById('copybtn');
-  var ok=function(){
-    btn.classList.add('done');
-    btn.textContent='✓';
-    setTimeout(function(){btn.classList.remove('done');btn.textContent='📋';},1800);
-  };
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(val).then(ok).catch(function(){
-      fallback(val);ok();
-    });
-  } else {
-    fallback(val);ok();
-  }
-}
-function fallback(t){
-  var a=document.createElement('textarea');
-  a.value=t;a.style.position='fixed';a.style.opacity='0';
-  document.body.appendChild(a);a.select();
-  document.execCommand('copy');document.body.removeChild(a);
-}
+function copyMac(){var val=document.getElementById('macval').textContent.trim();var btn=document.getElementById('copybtn');var ok=function(){btn.classList.add('done');btn.textContent='✓';setTimeout(function(){btn.classList.remove('done');btn.textContent='📋';},1800);};if(navigator.clipboard){navigator.clipboard.writeText(val).then(ok).catch(function(){fallback(val);ok();});}else{fallback(val);ok();}}
+function fallback(t){var a=document.createElement('textarea');a.value=t;a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();document.execCommand('copy');document.body.removeChild(a);}
 </script>
 </body>
 </html>
@@ -2376,39 +2255,16 @@ HTML
 CGISCRIPT
 
 chmod +x /www/cgi-bin/my-mac
-ok "CGI-скрипт записан"
 
-# ── Редирект my-mac/ → CGI ─────────────────────────────────────
-step "Создаём редирект /www/my-mac/index.html"
 cat > /www/my-mac/index.html << 'HTML'
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0;url=/cgi-bin/my-mac">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atlanta Router — MAC</title>
-</head>
-<body style="margin:0;background:#000;color:#f0f4ff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh">
-  <a href="/cgi-bin/my-mac" style="color:#0ab3ff">Открыть страницу MAC</a>
-</body>
-</html>
+<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/cgi-bin/my-mac"></head><body></body></html>
 HTML
-ok "Редирект создан"
 
-# ── uhttpd: добавляем алиас ────────────────────────────────────
-step "Настраиваем uhttpd"
 uci -q delete uhttpd.main.alias 2>/dev/null || true
 uci -q add_list uhttpd.main.alias='/my-mac/=/www/my-mac/index.html' 2>/dev/null || true
 uci -q commit uhttpd 2>/dev/null || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
-ok "uhttpd перезапущен"
 
-# ── Финал ──────────────────────────────────────────────────────
-printf '\n'
-printf "${CG}╔══════════════════════════════════════════╗${C0}\n"
-printf "${CG}║      ✅  MAC PAGE УСТАНОВЛЕНА!           ║${C0}\n"
-printf "${CG}╠══════════════════════════════════════════╣${C0}\n"
-printf "${CG}║${C0}  Открыть: ${CB}http://atlanta.lan/my-mac/${C0}%*s${CG}║${C0}\n" 4 ""
-printf "${CG}║${C0}  Или:     ${CB}http://192.168.14.1/my-mac/${C0}%*s${CG}║${C0}\n" 3 ""
-printf "${CG}╚══════════════════════════════════════════╝${C0}\n\n"
+printf "\n${CG}✅ Готово! Открывай: ${CB}http://atlanta.lan/my-mac/${C0}\n\n"
+EOF
+sh /tmp/install_mac_page.sh
