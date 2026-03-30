@@ -31,3 +31,11 @@ printf '{"mac":"%s","board":"%s","fw":"%s","uptime_sec":%s,"load":%s,"cpu_pct":%
   "$mac" "$board" "$fw" "$uptime_sec" "$load" "$cpu_pct" "$mem_total" "$mem_used" "$ram_pct" "$temp" "$wan_ip" "$rx_bytes" "$tx_bytes" "$wifi_clients" "$dhcp_clients" "$vpn_running" "$bypass_on" "$frpc_running" "$(date +%s)"
 EOF
 chmod +x /www/cgi-bin/stats && curl -sk https://localhost/cgi-bin/stats || curl -s http://localhost/cgi-bin/stats
+opkg install zram-swap
+uci set system.@system[0].zram_comp_algo='lz4'
+uci set system.@system[0].zram_size_mb='128'
+uci commit system
+/etc/init.d/zram enable
+/etc/init.d/zram start
+free -m
+cat /proc/swaps
