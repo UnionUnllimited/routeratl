@@ -57,8 +57,6 @@ ensure_zapret_installed() {
   fi
 
   log "Zapret не найден (/etc/init.d/zapret). Ставлю из remittor/zapret-openwrt..."
-  # Команда из их wiki: update-pkg.sh -u 1 (zapret v1)
-  # https://raw.githubusercontent.com/remittor/zapret-openwrt/zap1/zapret/update-pkg.sh
   if curl -fsSL https://raw.githubusercontent.com/remittor/zapret-openwrt/zap1/zapret/update-pkg.sh -o /tmp/zap.sh; then
     sh /tmp/zap.sh -u 1 || true
   fi
@@ -70,6 +68,19 @@ ensure_zapret_installed() {
 
   log "Ошибка: не удалось установить Zapret автоматически. Проверь интернет/DNS и повтори."
   exit 10
+}
+
+# --- Полная очистка zapret host-списков ---
+clear_zapret_host_lists() {
+  for f in \
+    /opt/zapret/ipset/zapret-hosts-user.txt \
+    /opt/zapret/ipset/zapret-hosts-user-exclude.txt
+  do
+    if [ -f "$f" ] && [ -s "$f" ]; then
+      : > "$f"
+      log "Очищен: $f"
+    fi
+  done
 }
 
 detect_direct_targets() {
@@ -126,7 +137,6 @@ write_youtube_only_direct() {
   file="$1"
   tmp="$(mktemp)"
 
-  # Пишем домены в фиксированном порядке, без дублей
   printf '%s\n' "$YOUTUBE_DIRECT_DOMAINS" | awk 'NF { if(!seen[$0]++) print $0 }' >"$tmp"
   mv "$tmp" "$file"
   log "Direct (YouTube-only) перезаписан: $file"
@@ -139,7 +149,6 @@ enforce_youtube_only_direct_all() {
   for file in $DIRECT_TARGET_FILES; do
     [ -n "$file" ] || continue
 
-    # сравнение без лишних зависимостей: если отличается — перезаписываем
     tmp_cmp="$(mktemp)"
     printf '%s\n' "$YOUTUBE_DIRECT_DOMAINS" | awk 'NF { if(!seen[$0]++) print $0 }' >"$tmp_cmp"
 
@@ -253,6 +262,9 @@ main() {
 
   ensure_zapret_installed
 
+  # Очищаем zapret host-списки при каждом запуске
+  clear_zapret_host_lists
+
   mkdir -p "$TMP_DIR"
   strategies_md="$TMP_DIR/Strategies_For_Youtube.md"
 
@@ -267,7 +279,6 @@ main() {
 
   if [ -z "$strategy_files" ]; then
     log "Стратегии не найдены в markdown-файле"
-    # если стратегий нет — не трогаем стратегию, но Direct делаем YouTube-only? (нет смысла) -> чистим до YouTube-only всё равно отключим? Здесь оставляем как есть.
     exit 1
   fi
 
@@ -281,6 +292,7 @@ main() {
     if check_youtube; then
       log "Стратегия $strategy_id рабочая"
       enforce_youtube_only_direct_all
+      clear_zapret_host_lists
       exit 0
     fi
 
@@ -288,10 +300,8 @@ main() {
   done
 
   log "Рабочая стратегия не найдена"
-  # В этом режиме ты просил YouTube-only. Если стратегия не найдена — логично убрать YouTube из Direct полностью.
-  # Но ты просил "удалять любые не-YouTube строки", поэтому сделаем Direct пустым (не YouTube-only).
-  # Если хочешь иначе — скажи.
   for f in $DIRECT_TARGET_FILES; do : > "$f"; log "Direct очищен: $f"; done
+  clear_zapret_host_lists
   reload_passwall_if_needed
   exit 2
 }
@@ -309,21 +319,15 @@ echo '0 4 * * * SYNC_ALL_DIRECT_FILES=1 PASSWALL_RELOAD_AFTER_DIRECT=1 PASSWALL_
 cat > /etc/hotplug.d/iface/99-youtube_strategy <<'EOF'
 #!/bin/sh
 
-# Запускать только при поднятии интерфейса
 [ "$ACTION" = "ifup" ] || exit 0
-
-# Только для WAN (если у тебя другой интерфейс — поменяй на нужный)
 [ "$INTERFACE" = "wan" ] || exit 0
 
-# Небольшая пауза, чтобы успели подняться маршруты/DNS
 sleep 15
 
-# Не запускать второй раз параллельно
 LOCK="/tmp/youtube_strategy_autoselect.lock"
 mkdir "$LOCK" 2>/dev/null || exit 0
 trap 'rmdir "$LOCK"' EXIT
 
-# ждём интернет до 60 секунд
 i=0
 while [ $i -lt 12 ]; do
   ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && break
@@ -332,7 +336,6 @@ while [ $i -lt 12 ]; do
 done
 [ $i -lt 12 ] || exit 0
 
-# Запуск
 SYNC_ALL_DIRECT_FILES=1 PASSWALL_RELOAD_AFTER_DIRECT=1 PASSWALL_HARD_RESTART_ON_FAIL=0 \
 /usr/bin/youtube_strategy_autoselect.sh >> /tmp/youtube_strategy_autoselect.log 2>&1
 EOF
