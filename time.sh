@@ -39,3 +39,92 @@ uci commit system
 /etc/init.d/zram start
 free -m
 cat /proc/swaps
+cat > /usr/bin/frpc_watchdog.sh << "SCRIPT"
+#!/bin/sh
+SCRIPT_PATH="/usr/bin/frpc_watchdog.sh"
+INITD_PATH="/etc/init.d/frpc_watchdog"
+LOGFILE="/tmp/frpc_watchdog.log"
+PIDFILE="/tmp/frpc_watchdog.pid"
+FRPC_BIN="/usr/bin/frpc"
+FRPC_CONF="/etc/frp/frpc.toml"
+PING_TARGET="8.8.8.8"
+PING_COUNT=2
+PING_TIMEOUT=4
+CHECK_INTERVAL=30
+MAX_LOG_LINES=200
+
+log() {
+    local msg="$(date "+%Y-%m-%d %H:%M:%S") $1"
+    echo "$msg" >> "$LOGFILE"
+    echo "$msg"
+    local lines=$(wc -l < "$LOGFILE" 2>/dev/null || echo 0)
+    if [ "$lines" -gt "$MAX_LOG_LINES" ]; then
+        tail -n 100 "$LOGFILE" > "$LOGFILE.tmp"
+        mv "$LOGFILE.tmp" "$LOGFILE"
+    fi
+}
+
+check_internet() {
+    ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$PING_TARGET" >/dev/null 2>&1
+}
+
+check_frpc() {
+    pgrep -x frpc >/dev/null 2>&1
+}
+
+start_frpc() {
+    [ ! -f "$FRPC_BIN" ] && log "[ERROR] frpc not found: $FRPC_BIN" && return 1
+    [ ! -f "$FRPC_CONF" ] && log "[ERROR] config not found: $FRPC_CONF" && return 1
+    killall -9 frpc 2>/dev/null
+    sleep 1
+    "$FRPC_BIN" -c "$FRPC_CONF" >/dev/null 2>&1 &
+    sleep 3
+    if check_frpc; then
+        log "[OK] frpc started, PID: $(pgrep -x frpc)"
+    else
+        log "[ERROR] frpc failed to start"
+        return 1
+    fi
+}
+
+run_loop() {
+    echo $$ > "$PIDFILE"
+    log "[START] Watchdog started, PID: $$, interval: ${CHECK_INTERVAL}s"
+    while true; do
+        if ! check_internet; then
+            log "[WAIT] No internet"
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
+        if ! check_frpc; then
+            log "[WARN] frpc is down, internet OK — restarting"
+            start_frpc
+        fi
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
+case "$1" in
+    run) run_loop ;;
+    *) echo "Usage: $0 run" ;;
+esac
+SCRIPT
+chmod +x /usr/bin/frpc_watchdog.sh
+
+cat > /etc/init.d/frpc_watchdog << "INITEOF"
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/frpc_watchdog.sh run
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+INITEOF
+chmod +x /etc/init.d/frpc_watchdog
+/etc/init.d/frpc_watchdog enable
+/etc/init.d/frpc_watchdog start
+echo "=== FRP Watchdog installed, checking every 30s ==="
