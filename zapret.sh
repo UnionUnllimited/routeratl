@@ -2,14 +2,13 @@ cat > /tmp/install_zapret.sh <<'EOF'
 #!/bin/sh
 
 TMP_SF="/tmp/zapret_install"
-
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m'
 
-log() { echo -e "$1"; }
+log()  { echo -e "$1"; }
 fail() { echo -e "\n${RED}$1${NC}\n"; exit 1; }
 
 detect_pkg_manager() {
@@ -28,23 +27,99 @@ detect_arch() {
     else
         ARCH="$(opkg print-architecture 2>/dev/null | awk '/^arch / && $2 != "all" && $2 != "noarch" {print $2}' | tail -n1)"
     fi
-
     [ -n "$ARCH" ] || fail "Не удалось определить архитектуру роутера"
 }
 
+ensure_downloader() {
+    if command -v curl >/dev/null 2>&1; then
+        DL_TOOL="curl"
+    elif command -v wget >/dev/null 2>&1; then
+        DL_TOOL="wget"
+    else
+        fail "Не найден ни curl, ни wget"
+    fi
+}
+
+fetch_to_file() {
+    url="$1"
+    out="$2"
+
+    if [ "$DL_TOOL" = "curl" ]; then
+        curl -fsSL --connect-timeout 15 --max-time 60 -A "Mozilla/5.0" "$url" -o "$out"
+    else
+        wget -q --timeout=15 --tries=1 -U "Mozilla/5.0" -O "$out" "$url"
+    fi
+}
+
+fetch_to_stdout() {
+    url="$1"
+
+    if [ "$DL_TOOL" = "curl" ]; then
+        curl -fsSL --connect-timeout 15 --max-time 60 -A "Mozilla/5.0" "$url"
+    else
+        wget -q --timeout=15 --tries=1 -U "Mozilla/5.0" -O - "$url"
+    fi
+}
+
+github_api_latest_url() {
+    API_URL="https://api.github.com/repos/remittor/zapret-openwrt/releases/latest"
+    API_JSON="$TMP_SF/latest_release.json"
+
+    log "${CYAN}Пробую получить релиз через GitHub API...${NC}"
+    fetch_to_file "$API_URL" "$API_JSON" || return 1
+
+    LATEST_URL="$(grep -o "https://[^\"]*zapret_[^\"]*_${ARCH}\.zip" "$API_JSON" | head -n1 || true)"
+    [ -n "$LATEST_URL" ] || return 1
+
+    FILE_NAME="$(basename "$LATEST_URL")"
+    return 0
+}
+
+direct_tag_guess_url() {
+    TAG_FILE="$TMP_SF/latest_tag.txt"
+    TAG=""
+    TAG_URL="https://api.github.com/repos/remittor/zapret-openwrt/releases/latest"
+
+    log "${CYAN}Пробую определить tag релиза...${NC}"
+    if fetch_to_file "$TAG_URL" "$TMP_SF/latest_tag.json"; then
+        TAG="$(sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP_SF/latest_tag.json" | head -n1)"
+    fi
+
+    if [ -z "$TAG" ]; then
+        TAG="$(fetch_to_stdout https://github.com/remittor/zapret-openwrt/releases/latest 2>/dev/null | sed -n 's@.*releases/tag/\([^"]*\).*@\1@p' | head -n1)"
+    fi
+
+    [ -n "$TAG" ] || return 1
+
+    for name in \
+        "zapret-openwrt_${ARCH}.zip" \
+        "zapret_${ARCH}.zip" \
+        "zapret-${ARCH}.zip"
+    do
+        test_url="https://github.com/remittor/zapret-openwrt/releases/download/${TAG}/${name}"
+        if fetch_to_file "$test_url" "$TMP_SF/.probe" 2>/dev/null; then
+            rm -f "$TMP_SF/.probe"
+            LATEST_URL="$test_url"
+            FILE_NAME="$name"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 find_latest_url() {
-    RELEASES_URL="https://github.com/remittor/zapret-openwrt/releases/latest"
-    HTML_FILE="$TMP_SF/releases_latest.html"
+    mkdir -p "$TMP_SF" || fail "Не удалось создать временную папку"
+    rm -rf "$TMP_SF"/* 2>/dev/null || true
 
     log "${CYAN}Ищем последний релиз Zapret для архитектуры ${NC}$ARCH"
-    wget -q -O "$HTML_FILE" "$RELEASES_URL" || fail "Не удалось открыть страницу релизов"
 
-    REL_PATH="$(grep -o "/remittor/zapret-openwrt/releases/download/[^\"]*/zapret_[^\"]*_${ARCH}\.zip" "$HTML_FILE" | head -n1)"
+    github_api_latest_url && return 0
+    log "${CYAN}GitHub API не дал ссылку, пробую запасной способ...${NC}"
 
-    [ -n "$REL_PATH" ] || fail "Не найден архив zapret для архитектуры: $ARCH"
+    direct_tag_guess_url && return 0
 
-    LATEST_URL="https://github.com$REL_PATH"
-    FILE_NAME="$(basename "$LATEST_URL")"
+    fail "Не удалось определить ссылку на архив Zapret для архитектуры: $ARCH"
 }
 
 install_pkg() {
@@ -52,7 +127,6 @@ install_pkg() {
     pkg_file="$2"
 
     log "${CYAN}Устанавливаем ${NC}$display_name"
-
     if [ "$PKG_IS_APK" -eq 1 ]; then
         apk add --allow-untrusted "$pkg_file" >/dev/null 2>&1 || fail "Не удалось установить $display_name"
     else
@@ -63,17 +137,16 @@ install_pkg() {
 stop_old_zapret() {
     if [ -f /etc/init.d/zapret ]; then
         log "${CYAN}Останавливаем ${NC}zapret"
-        /etc/init.d/zapret stop >/dev/null 2>&1
+        /etc/init.d/zapret stop >/dev/null 2>&1 || true
     fi
 
     for pid in $(pgrep -f /opt/zapret 2>/dev/null); do
-        kill -9 "$pid" 2>/dev/null
+        kill -9 "$pid" 2>/dev/null || true
     done
 }
 
 update_pkg_lists() {
     log "${CYAN}Обновляем список пакетов${NC}"
-
     if [ "$PKG_IS_APK" -eq 1 ]; then
         apk update >/dev/null 2>&1 || fail "Ошибка при обновлении apk"
     else
@@ -93,12 +166,11 @@ install_unzip_if_needed() {
 }
 
 download_archive() {
-    mkdir -p "$TMP_SF" || fail "Не удалось создать временную папку"
-    rm -rf "$TMP_SF"/* 2>/dev/null
     cd "$TMP_SF" || fail "Не удалось перейти в $TMP_SF"
 
     log "${CYAN}Скачиваем архив ${NC}$FILE_NAME"
-    wget -q -U "Mozilla/5.0" -O "$FILE_NAME" "$LATEST_URL" || fail "Не удалось скачать $FILE_NAME"
+    fetch_to_file "$LATEST_URL" "$FILE_NAME" || fail "Не удалось скачать $FILE_NAME"
+    [ -s "$FILE_NAME" ] || fail "Скачан пустой архив: $FILE_NAME"
 }
 
 extract_archive() {
@@ -139,21 +211,21 @@ install_from_archive() {
 cleanup() {
     log "${CYAN}Удаляем временные файлы${NC}"
     cd /
-    rm -rf "$TMP_SF" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
+    rm -rf "$TMP_SF" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null || true
 }
 
 start_zapret_if_exists() {
     if [ -f /etc/init.d/zapret ]; then
-        /etc/init.d/zapret enable >/dev/null 2>&1
-        /etc/init.d/zapret restart >/dev/null 2>&1
+        /etc/init.d/zapret enable >/dev/null 2>&1 || true
+        /etc/init.d/zapret restart >/dev/null 2>&1 || true
     fi
 }
 
 main() {
     log "${MAGENTA}Устанавливаем ZAPRET${NC}"
-
     detect_pkg_manager
     detect_arch
+    ensure_downloader
     stop_old_zapret
     update_pkg_lists
     install_unzip_if_needed
@@ -170,7 +242,9 @@ main() {
 
 main
 EOF
-chmod +x /tmp/install_zapret.sh && /tmp/install_zapret.sh
+
+chmod +x /tmp/install_zapret.sh
+/tmp/install_zapret.sh
 cat > /usr/bin/youtube_strategy_autoselect.sh <<'EOF'
 #!/bin/sh
 set -eu
